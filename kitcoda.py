@@ -60,6 +60,8 @@ def import_functions_only(path, functions):
 
 
 def run_line(line, variables, functions):
+    if line in ["{", "}", "bop {"]:
+        return  # quietly skip control flow markers
     try:
         line = strip_comment(line)
 
@@ -91,6 +93,8 @@ def run_line(line, variables, functions):
                     result = ""
 
                 variables[varname] = [result]
+            elif value_line in variables:
+                variables[varname] = [variables[value_line][0]]
             else:
                 variables[varname] = [value_line]
 
@@ -107,14 +111,24 @@ def run_line(line, variables, functions):
             baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
             if is_inline_block:
-                line = strip_comment(line)  # 🆕 Fix here
-                inner = line[line.index("{")+1:line.rindex("}")].strip()
-                if baptruth:
-                    if inner.startswith('"') and inner.endswith('"'):
-                        return inner.strip('"')
-                    return run_and_capture(inner, variables, functions)
+                clean = strip_comment(line)
+                if "} else {" in clean:
+                    before_else, after_else = clean.split("} bop {", 1)
+                    true_block = before_else.split("{", 1)[1].strip()
+                    false_block = after_else.rsplit("}", 1)[0].strip()
+                else:
+                    true_block = clean.split("{", 1)[1].rsplit("}", 1)[0].strip()
+                    false_block = None
+
+                block = true_block if baptruth else false_block
+
+                if block:
+                    if block.startswith('"') and block.endswith('"'):
+                        return block.strip('"')
+                    return run_and_capture(block, variables, functions)
                 else:
                     return ""
+
 
             else:
                 print("[kitcoda error] multiline bap blocks must be in a REPL or file.")
@@ -200,15 +214,26 @@ def compile():
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
                 block_lines = []
+                else_lines = []
+                collecting_else = False
+
                 while True:
                     block_line = input("... ").strip()
-                    if block_line == "}":
+                    if block_line == "} bop {":
+                        collecting_else = True
+                        continue
+                    elif block_line == "}":
                         break
-                    block_lines.append(block_line)
+                    elif collecting_else:
+                        else_lines.append(block_line)
+                    else:
+                        block_lines.append(block_line)
 
-                if baptruth:
-                    for bl in block_lines:
-                        run_line(bl, variables, functions)
+                chosen_block = block_lines if baptruth else else_lines
+
+                for bl in chosen_block:
+                    run_line(bl, variables, functions)
+
         else:
             run_line(line, variables, functions)
 
@@ -275,24 +300,41 @@ def main():
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
                 if "{" in line and line.strip().endswith("}"):
-                    # INLINE one-liner version
+                    # INLINE
                     inner = line[line.index("{")+1:line.rindex("}")].strip()
                     if baptruth:
                         run_line(inner, variables, functions)
                 else:
-                    # MULTILINE block version
-                    block_lines = []
+                    # MULTILINE
                     i += 1
+                    block_lines = []
+                    else_lines = []
+                    collecting_else = False
+
                     while i < len(lines):
                         block_line = lines[i].strip()
                         if block_line == "}":
-                            break
-                        block_lines.append(block_line)
+                            # Check if next line is 'bop {'
+                            if i + 1 < len(lines) and lines[i + 1].strip() == "bop {":
+                                collecting_else = True
+                                i += 2  # skip over the 'bop {' line
+                                continue
+                            else:
+                                break
+                        elif collecting_else:
+                            else_lines.append(block_line)
+                        else:
+                            block_lines.append(block_line)
                         i += 1
 
-                    if baptruth:
-                        for bl in block_lines:
-                            run_line(bl, variables, functions)
+                    chosen_block = block_lines if baptruth else else_lines
+
+                    for bl in chosen_block:
+                        run_line(bl, variables, functions)
+
+                    continue  # skip extra i += 1
+
+
 
         else:
             run_line(line, variables, functions)
