@@ -3,15 +3,47 @@ import sys
 import shlex
 import io
 import contextlib
+import re
 
-def run_and_capture(line, variables, functions):
+def tokenize(line):
+    """
+    Custom tokenizer that splits like tokenize(),
+    but handles nested quotes and escaped quotes.
+    """
+    pattern = r'''
+        (                               # Start group
+            "(?:\\.|[^"\\])*"           # Double-quoted string, support escapes
+            | '(?:\\.|[^'\\])*'         # Single-quoted string, support escapes
+            | [^\s"']+                  # Or bareword
+        )
+    '''
+    return [tok.strip() for tok in re.findall(pattern, line, re.VERBOSE)]
+
+
+def extract_block(lines, start_index):
+    block_lines = []
+    i = start_index + 1
+    while i < len(lines):
+        line = lines[i].strip()
+        if line == "}":
+            break
+        block_lines.append(line)
+        i += 1
+    return block_lines, i
+
+def run_and_capture(line, variables, functions, repl_mode=False):
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         run_line(line, variables, functions)
     return buffer.getvalue().strip()
 
 def resolve_value(word, variables):
-    return variables[word][0] if word in variables else word
+    if word in variables:
+        return variables[word][0]
+    if (word.startswith('"') and word.endswith('"')) or (word.startswith("'") and word.endswith("'")):
+        return word[1:-1]
+    return word
+
 
 def strip_comment(line):
     in_quote = False
@@ -36,7 +68,7 @@ def import_functions_only(path, functions):
 
         try:
             line = strip_comment(line)
-            words = shlex.split(line)
+            words = tokenize(line)
         except ValueError as e:
             print(f"[kitcoda error] line {i+1}: {e}")
             i += 1
@@ -59,7 +91,7 @@ def import_functions_only(path, functions):
         i += 1
 
 
-def run_line(line, variables, functions):
+def run_line(line, variables, functions, repl_mode=False):
     if line in ["{", "}", "bop {"]:
         return  # quietly skip control flow markers
     try:
@@ -68,7 +100,7 @@ def run_line(line, variables, functions):
         # ✨ check this early!
         is_inline_block = "{" in line and line.strip().endswith("}")
 
-        words = shlex.split(line)
+        words = tokenize(line)
     except ValueError as e:
         print(f"[kitcoda error]: {e}")
         return
@@ -105,14 +137,15 @@ def run_line(line, variables, functions):
             value = input(prompt)
             variables[varname] = [value.strip()]
     elif cmd == "bap":
-        if len(words) >= 6 and words[2] in ["is", "isnt"] and words[3] == "like":
+        if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
             val1 = resolve_value(words[1], variables)
             val2 = resolve_value(words[4], variables)
             baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
             if is_inline_block:
                 clean = strip_comment(line)
-                if "} else {" in clean:
+                # bop check (inline else)
+                if "} bop {" in clean:
                     before_else, after_else = clean.split("} bop {", 1)
                     true_block = before_else.split("{", 1)[1].strip()
                     false_block = after_else.rsplit("}", 1)[0].strip()
@@ -121,18 +154,16 @@ def run_line(line, variables, functions):
                     false_block = None
 
                 block = true_block if baptruth else false_block
-
                 if block:
-                    if block.startswith('"') and block.endswith('"'):
-                        return block.strip('"')
-                    return run_and_capture(block, variables, functions)
+                    result = run_and_capture(block, variables, functions)
+                    return result if result else ("true" if baptruth else "false")
                 else:
-                    return ""
-
-
+                    return "true" if baptruth else "false"
             else:
-                print("[kitcoda error] multiline bap blocks must be in a REPL or file.")
-                return ""
+                # Multiline block handler (used in compile()/main())
+                return "true" if baptruth else "false"
+
+
 
 
 
@@ -168,6 +199,44 @@ def run_line(line, variables, functions):
 
     elif cmd == "nap":
         exit()
+    elif cmd == "spin":
+        block = []
+
+        if "{" in line and line.strip().endswith("}"):
+            # inline block: spin 3 {meow "hi"}
+            inner = line[line.index("{")+1:line.rindex("}")].strip()
+            block = [inner]
+        elif repl_mode:
+            # multiline input in REPL
+            while True:
+                block_line = input("... ").strip()
+                if block_line == "}":
+                    break
+                block.append(block_line)
+        else:
+            # in file mode, block should already be extracted
+            print("[kitcoda error] Multiline spin blocks must be pre-parsed in file mode.")
+            return
+
+        if words[1].isdigit():
+            count = int(words[1])
+            for _ in range(count):
+                for b in block:
+                    run_line(b, variables, functions, repl_mode=repl_mode)
+
+        elif words[1] == "while":
+            brace_index = line.index("{")
+            cond = line[line.index("while") + 5 : brace_index].strip()
+            while True:
+                result = run_and_capture(f"bap {cond} {{ \"true\" }}", variables, functions, repl_mode=repl_mode)
+                if result.strip() != "true":
+                    break
+                for b in block:
+                    run_line(b, variables, functions, repl_mode=repl_mode)
+
+
+
+
     else:
         print("Invalid command.")
 
@@ -181,7 +250,7 @@ def compile():
         lines.append(line)
         try:
             line = strip_comment(line)
-            words = shlex.split(line)
+            words = tokenize(line)
         except ValueError as e:
             print(f"[kitcoda error] line {i+1}: {e}")
             i += 1
@@ -204,13 +273,16 @@ def compile():
                     func_lines.append(fline)
                 functions[funcname] = func_lines
         elif cmd == "bap":
-            if len(words) >= 6 and (words[2] == "is" or words[2] == "isnt") and words[3] == "like" and words[5] == "{":
-                var1 = words[1]
-                var2 = words[4]
+            if "{" in line and line.strip().endswith("}"):
+                result = run_line(line, variables, functions)
+                if result is not None and result != "":
+                    print(result)
+                i += 1
+                continue
 
-                val1 = resolve_value(var1, variables)
-                val2 = resolve_value(var2, variables)
-
+            if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like" and words[5] == "{":
+                val1 = resolve_value(words[1], variables)
+                val2 = resolve_value(words[4], variables)
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
                 block_lines = []
@@ -219,23 +291,33 @@ def compile():
 
                 while True:
                     block_line = input("... ").strip()
-                    if block_line == "} bop {":
+                    if block_line == "}":
+                        # check if next line is 'bop {'
+                        next_line = input("... ").strip()
+                        if next_line == "bop {":
+                            collecting_else = True
+                            continue
+                        else:
+                            break
+                    elif block_line == "} bop {":
                         collecting_else = True
                         continue
-                    elif block_line == "}":
-                        break
                     elif collecting_else:
                         else_lines.append(block_line)
                     else:
                         block_lines.append(block_line)
 
                 chosen_block = block_lines if baptruth else else_lines
-
                 for bl in chosen_block:
-                    run_line(bl, variables, functions)
-
+                    result = run_line(bl, variables, functions)
+                    if result is not None and result != "":
+                        print(result)
+            else:
+                print(f"[kitcoda error] Invalid syntax: {line}")
         else:
-            run_line(line, variables, functions)
+            result = run_line(line, variables, functions, repl_mode=True)
+            if result is not None and result != "":
+                print(result)
 
         i += 1
 
@@ -267,7 +349,7 @@ def main():
         line = lines[i]
         try:
             line = strip_comment(line)
-            words = shlex.split(line)
+            words = tokenize(line)
         except ValueError as e:
             print(f"[kitcoda error] line {i+1}: {e}")
             i += 1
@@ -294,7 +376,7 @@ def main():
 
 
         elif cmd == "bap":
-            if len(words) >= 6 and words[2] in ["is", "isnt"] and words[3] == "like":
+            if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
                 val1 = resolve_value(words[1], variables)
                 val2 = resolve_value(words[4], variables)
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
@@ -334,10 +416,8 @@ def main():
 
                     continue  # skip extra i += 1
 
-
-
         else:
-            run_line(line, variables, functions)
+            run_line(line, variables, functions, repl_mode=False)
 
         i += 1
         
