@@ -1,6 +1,14 @@
 import os
 import sys
 import shlex
+import io
+import contextlib
+
+def run_and_capture(line, variables, functions):
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        run_line(line, variables, functions)
+    return buffer.getvalue().strip()
 
 def resolve_value(word, variables):
     return variables[word][0] if word in variables else word
@@ -53,51 +61,76 @@ def run_line(line, variables, functions):
     except ValueError as e:
         print(f"[kitcoda error]: {e}")
         return
-
     if not words:
         return
-
     cmd = words[0]
-
     if cmd == "meow":
         printstr = words[1:]
         output = [resolve_value(w, variables) for w in printstr]
         print(" ".join(output))
-
     elif cmd == "sit":
         if len(words) >= 4 and words[2] == "is":
             varname = words[1]
-            varvalue = " ".join(words[3:]).strip()
-            variables[varname] = [varvalue]
-
-
+            value_line = " ".join(words[3:])
+            if value_line.startswith("add ") or value_line.startswith("pounce ") or (value_line.startswith("bap ") and (value_line.endswith("}"))):
+                result = run_and_capture(value_line, variables, functions)
+                variables[varname] = [result]
+            else:
+                variables[varname] = [value_line]
 
     elif cmd == "eat":
         if len(words) >= 3 and words[2] == "is":
             varname = words[1]
-            varvalue = input(" ".join(words[3:]).strip())
-            variables[varname] = [varvalue.strip()]
+            prompt = " ".join(words[3:]).strip()
+            value = input(prompt)
+            variables[varname] = [value.strip()]
+    elif cmd == "bap":
+        if len(words) >= 6 and (words[2] in ["is", "isnt"]) and words[3] == "like":
+            var1 = resolve_value(words[1], variables)
+            var2 = resolve_value(words[4], variables)
+            truth = (var1 == var2) if words[2] == "is" else (var1 != var2)
+
+            # try to grab one-line block like: bap a is like b { meow yes }
+            joined = " ".join(words[5:])
+            if joined.startswith("{") and joined.endswith("}"):
+                inner = joined[1:-1].strip()
+                if truth:
+                    run_line(inner, variables, functions)
+            else:
+                print("[kitcoda error] malformed bap block.")
 
     elif cmd == "pounce":
         funcname = words[1]
         if funcname in functions:
             for fline in functions[funcname]:
                 run_line(fline, variables, functions)
-    
     elif cmd == "sip":
         if len(words) >= 2:
             import_path = resolve_value(words[1], variables)
             if os.path.exists(import_path) and import_path.endswith(".kit"):
                 import_functions_only(import_path, functions)
-                print(f"[kitcoda] sipped {import_path}, functions loaded.")
             else:
                 print(f"[kitcoda error] could not sip file '{import_path}'")
-
-
+    elif cmd in ["add", "subtract", "multiply", "divide"]:
+        if words[1].isdigit() and words[2] == "with" and words[3].isdigit():
+            num1 = int(words[1])
+            num2 = int(words[3])
+            if cmd == "add":
+                result = num1+num2
+            elif cmd == "subtract":
+                result = num1-num2
+            elif cmd == "multiply":
+                result = num1*num2
+            elif cmd == "divide":
+                result = num1/num2
+            else:
+                print("Syntax error")
+            print(result)
 
     elif cmd == "nap":
         exit()
-
+    else:
+        print("Invalid command.")
 
 def compile():
     i = 0
@@ -119,7 +152,7 @@ def compile():
             i += 1
             continue
 
-        cmd = words[0]
+        cmd = words[0].lower()
 
         if cmd == "purr":
             if len(words) == 3 and words[2] == "{":
@@ -232,5 +265,6 @@ def main():
             run_line(line, variables, functions)
 
         i += 1
+        
 
 main()
