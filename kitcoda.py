@@ -14,11 +14,16 @@ def resolve_value(word, variables):
     return variables[word][0] if word in variables else word
 
 def strip_comment(line):
-    try:
-        parts = shlex.split(line, comments=True, posix=True)
-        return shlex.join(parts)
-    except:
-        return line.split("#")[0].strip()  # fallback if quotes are broken
+    in_quote = False
+    result = ""
+    for i, char in enumerate(line):
+        if char == '"' and (i == 0 or line[i - 1] != "\\"):
+            in_quote = not in_quote
+        if char == "#" and not in_quote:
+            break
+        result += char
+    return result.strip()
+
 
 
 def import_functions_only(path, functions):
@@ -57,23 +62,34 @@ def import_functions_only(path, functions):
 def run_line(line, variables, functions):
     try:
         line = strip_comment(line)
+
+        # ✨ check this early!
+        is_inline_block = "{" in line and line.strip().endswith("}")
+
         words = shlex.split(line)
     except ValueError as e:
         print(f"[kitcoda error]: {e}")
         return
+
+    if not line:
+        return
     if not words:
         return
+    
     cmd = words[0]
     if cmd == "meow":
         printstr = words[1:]
         output = [resolve_value(w, variables) for w in printstr]
-        print(" ".join(output))
+        print(" ".join(output), flush=True)
     elif cmd == "sit":
         if len(words) >= 4 and words[2] == "is":
             varname = words[1]
             value_line = " ".join(words[3:])
             if value_line.startswith("add ") or value_line.startswith("pounce ") or (value_line.startswith("bap ") and (value_line.endswith("}"))):
-                result = run_and_capture(value_line, variables, functions)
+                result = run_line(value_line, variables, functions)
+                if result is None:
+                    result = ""
+
                 variables[varname] = [result]
             else:
                 variables[varname] = [value_line]
@@ -85,19 +101,28 @@ def run_line(line, variables, functions):
             value = input(prompt)
             variables[varname] = [value.strip()]
     elif cmd == "bap":
-        if len(words) >= 6 and (words[2] in ["is", "isnt"]) and words[3] == "like":
-            var1 = resolve_value(words[1], variables)
-            var2 = resolve_value(words[4], variables)
-            truth = (var1 == var2) if words[2] == "is" else (var1 != var2)
+        if len(words) >= 6 and words[2] in ["is", "isnt"] and words[3] == "like":
+            val1 = resolve_value(words[1], variables)
+            val2 = resolve_value(words[4], variables)
+            baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
-            # try to grab one-line block like: bap a is like b { meow yes }
-            joined = " ".join(words[5:])
-            if joined.startswith("{") and joined.endswith("}"):
-                inner = joined[1:-1].strip()
-                if truth:
-                    run_line(inner, variables, functions)
+            if is_inline_block:
+                line = strip_comment(line)  # 🆕 Fix here
+                inner = line[line.index("{")+1:line.rindex("}")].strip()
+                if baptruth:
+                    if inner.startswith('"') and inner.endswith('"'):
+                        return inner.strip('"')
+                    return run_and_capture(inner, variables, functions)
+                else:
+                    return ""
+
             else:
-                print("[kitcoda error] malformed bap block.")
+                print("[kitcoda error] multiline bap blocks must be in a REPL or file.")
+                return ""
+
+
+
+
 
     elif cmd == "pounce":
         funcname = words[1]
@@ -125,7 +150,7 @@ def run_line(line, variables, functions):
                 result = num1/num2
             else:
                 print("Syntax error")
-            print(result)
+            return str(result)
 
     elif cmd == "nap":
         exit()
@@ -172,7 +197,7 @@ def compile():
                 val1 = resolve_value(var1, variables)
                 val2 = resolve_value(var2, variables)
 
-                truth = (val1 == val2) if words[2] == "is" else (val1 != val2)
+                baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
                 block_lines = []
                 while True:
@@ -181,7 +206,7 @@ def compile():
                         break
                     block_lines.append(block_line)
 
-                if truth:
+                if baptruth:
                     for bl in block_lines:
                         run_line(bl, variables, functions)
         else:
@@ -233,34 +258,42 @@ def main():
             if len(words) == 3 and words[2] == "{":
                 funcname = words[1]
                 func_lines = []
-                while True:
-                    fline = input("... ").strip()
+                i += 1
+                while i < len(lines):
+                    fline = lines[i].strip()
                     if fline == "}":
                         break
                     func_lines.append(fline)
-                functions[funcname] = func_lines
-        elif cmd == "bap":
-            if len(words) >= 6 and (words[2] == "is" or words[2] == "isnt") and words[3] == "like" and words[5] == "{":
-                var1 = words[1]
-                var2 = words[4]
-
-                val1 = resolve_value(var1, variables)
-                val2 = resolve_value(var2, variables)
-
-                truth = (val1 == val2) if words[2] == "is" else (val1 != val2)
-
-                block_lines = []
-                i += 1
-                while i < len(lines):
-                    block_line = lines[i].strip()
-                    if block_line == "}":
-                        break
-                    block_lines.append(block_line)
                     i += 1
+                functions[funcname] = func_lines
 
-                if truth:
-                    for bl in block_lines:
-                        run_line(bl, variables, functions)
+
+        elif cmd == "bap":
+            if len(words) >= 6 and words[2] in ["is", "isnt"] and words[3] == "like":
+                val1 = resolve_value(words[1], variables)
+                val2 = resolve_value(words[4], variables)
+                baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
+
+                if "{" in line and line.strip().endswith("}"):
+                    # INLINE one-liner version
+                    inner = line[line.index("{")+1:line.rindex("}")].strip()
+                    if baptruth:
+                        run_line(inner, variables, functions)
+                else:
+                    # MULTILINE block version
+                    block_lines = []
+                    i += 1
+                    while i < len(lines):
+                        block_line = lines[i].strip()
+                        if block_line == "}":
+                            break
+                        block_lines.append(block_line)
+                        i += 1
+
+                    if baptruth:
+                        for bl in block_lines:
+                            run_line(bl, variables, functions)
+
         else:
             run_line(line, variables, functions)
 
