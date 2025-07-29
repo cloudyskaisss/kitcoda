@@ -1,5 +1,10 @@
 import os
 import sys
+import shlex
+
+def resolve_value(word, variables):
+    return variables[word][0] if word in variables else word
+
 
 def main():
     i = 0
@@ -26,7 +31,13 @@ def main():
 
     while i < len(lines):
         line = lines[i]
-        words = line.split()
+        try:
+            words = shlex.split(line)
+        except ValueError as e:
+            print(f"[kitcoda error] line {i+1}: {e}")
+            i += 1
+            continue
+
         if not words:
             i += 1
             continue
@@ -37,10 +48,8 @@ def main():
             printstr = words[1:]
             output = []
             for str in printstr:
-                if str in variables:
-                    output.append(variables[str][0])
-                else:
-                    output.append(str)
+                output.append(resolve_value(str, variables))
+
             print(" ".join(output))
 
         elif cmd == "sit":
@@ -50,17 +59,13 @@ def main():
                 variables[varname] = [varvalue]
 
         elif cmd == "bap":
-            if len(words) >= 6 and (words[2] == "is" or words[2] == "isn't") and words[3] == "like" and words[5] == "{":
+            if len(words) >= 6 and (words[2] == "is" or words[2] == "isnt") and words[3] == "like" and words[5] == "{":
                 var1 = words[1]
                 var2 = words[4]
 
-                if var1 not in variables or var2 not in variables:
-                    print("Invalid variables in bap.")
-                    i += 1
-                    continue
+                val1 = resolve_value(var1, variables)
+                val2 = resolve_value(var2, variables)
 
-                val1 = variables[var1][0]
-                val2 = variables[var2][0]
 
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
@@ -75,7 +80,13 @@ def main():
 
                 if baptruth:
                     for block_line in block_lines:
-                        eaten_words = block_line.split()
+                        try:
+                            eaten_words = shlex.split(block_line)
+                        except ValueError as e:
+                            print(f"[kitcoda error] line {i+1}: {e}")
+                            i += 1
+                            continue
+
                         if not eaten_words:
                             continue
                         eaten_cmd = eaten_words[0]
@@ -83,11 +94,14 @@ def main():
                             printstr = eaten_words[1:]
                             output = []
                             for str in printstr:
-                                if str in variables:
-                                    output.append(variables[str][0])
-                                else:
-                                    output.append(str)
+                                output.append(resolve_value(str, variables))
+
                             print(" ".join(output))
+        elif cmd == "eat":
+            if len(words) >= 3 and words[2] == "is":
+                varname = words[1]
+                varvalue = input(" ".join(words[3:]).strip())
+                variables[varname] = [varvalue.strip()]
         elif cmd == "sleep":
             exit()
 
