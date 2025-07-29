@@ -45,8 +45,9 @@ def main():
                 varvalue = words[3:]
                 tempvarvalue = ""
                 for f in varvalue:
-                    tempvarvalue = tempvarvalue + f
+                    tempvarvalue = tempvarvalue + f + " "
                 varvalue = tempvarvalue
+                varvalue = varvalue[:-1]
                 variables[varname] = [varvalue]
         elif cmd == "sleep":
             exit()
