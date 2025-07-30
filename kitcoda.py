@@ -5,6 +5,25 @@ import io
 import contextlib
 import re
 
+
+def evaluate_condition(cond_str, variables):
+    """
+    cond_str is like "bap x isn't like 3"
+    Returns True or False.
+    """
+    words = tokenize(cond_str)
+    # must start with bap
+    if words[0] == "bap" and words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
+        left  = resolve_value(words[1], variables)
+        right = resolve_value(words[4], variables)
+        if words[2] == "is":
+            return left == right
+        else:
+            return left != right
+    else:
+        print(f"[kitcoda error] invalid condition: {cond_str}")
+        return False
+
 def tokenize(line):
     """
     Custom tokenizer that splits like tokenize(),
@@ -18,6 +37,12 @@ def tokenize(line):
         )
     '''
     return [tok.strip() for tok in re.findall(pattern, line, re.VERBOSE)]
+
+def normalize_output(result):
+    result = result.strip()
+    if result.startswith('"') and result.endswith('"'):
+        result = result[1:-1]
+    return result
 
 
 def extract_block(lines, start_index):
@@ -34,15 +59,27 @@ def extract_block(lines, start_index):
 def run_and_capture(line, variables, functions, repl_mode=False):
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        run_line(line, variables, functions)
-    return buffer.getvalue().strip()
+        result = run_line(line, variables, functions, repl_mode=repl_mode, as_condition=True)
+        if result is not None:
+            print(result)
+    captured = buffer.getvalue().strip()
+
+
+    return normalize_output(captured)
+
+
+
 
 def resolve_value(word, variables):
+    val = None
     if word in variables:
-        return variables[word][0]
-    if (word.startswith('"') and word.endswith('"')) or (word.startswith("'") and word.endswith("'")):
-        return word[1:-1]
-    return word
+        val = variables[word][0]
+    elif (word.startswith('"') and word.endswith('"')) or (word.startswith("'") and word.endswith("'")):
+        val = word[1:-1]
+    else:
+        val = word
+    return val
+
 
 
 def strip_comment(line):
@@ -91,7 +128,7 @@ def import_functions_only(path, functions):
         i += 1
 
 
-def run_line(line, variables, functions, repl_mode=False):
+def run_line(line, variables, functions, repl_mode=False, as_condition=False):
     if line in ["{", "}", "bop {"]:
         return  # quietly skip control flow markers
     try:
@@ -115,6 +152,7 @@ def run_line(line, variables, functions, repl_mode=False):
         printstr = words[1:]
         output = [resolve_value(w, variables) for w in printstr]
         print(" ".join(output), flush=True)
+
     elif cmd == "sit":
         if len(words) >= 4 and words[2] == "is":
             varname = words[1]
@@ -137,14 +175,16 @@ def run_line(line, variables, functions, repl_mode=False):
             value = input(prompt)
             variables[varname] = [value.strip()]
     elif cmd == "bap":
-        if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
+
+        if words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
             val1 = resolve_value(words[1], variables)
             val2 = resolve_value(words[4], variables)
+
             baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
+            block = None  # Always define block early
 
             if is_inline_block:
                 clean = strip_comment(line)
-                # bop check (inline else)
                 if "} bop {" in clean:
                     before_else, after_else = clean.split("} bop {", 1)
                     true_block = before_else.split("{", 1)[1].strip()
@@ -154,16 +194,20 @@ def run_line(line, variables, functions, repl_mode=False):
                     false_block = None
 
                 block = true_block if baptruth else false_block
-                if block:
-                    result = run_and_capture(block, variables, functions)
+
+            if block:
+                if as_condition:
+                    # If this bap is used as a condition, return result of the block
+                    result = run_and_capture(block, variables, functions, repl_mode=repl_mode)
+                    result = normalize_output(result)
                     return result if result else ("true" if baptruth else "false")
                 else:
-                    return "true" if baptruth else "false"
+                    # If it's a control flow bap, just execute the block
+                    for line in block.split(";"):
+                        run_line(line.strip(), variables, functions)
+                    return None
             else:
-                # Multiline block handler (used in compile()/main())
                 return "true" if baptruth else "false"
-
-
 
 
 
@@ -182,63 +226,71 @@ def run_line(line, variables, functions, repl_mode=False):
             else:
                 print(f"[kitcoda error] could not sip file '{import_path}'")
     elif cmd in ["add", "subtract", "multiply", "divide"]:
-        if words[1].isdigit() and words[2] == "with" and words[3].isdigit():
-            num1 = int(words[1])
-            num2 = int(words[3])
+        if len(words) >= 4 and words[2] == "with":
+            num1_raw = resolve_value(words[1], variables)
+            num2_raw = resolve_value(words[3], variables)
+            try:
+                num1 = int(num1_raw)
+                num2 = int(num2_raw)
+            except ValueError:
+                print(f"[kitcoda error] cannot convert to number: '{num1_raw}', '{num2_raw}'")
+                return ""
+
             if cmd == "add":
-                result = num1+num2
+                result = num1 + num2
             elif cmd == "subtract":
-                result = num1-num2
+                result = num1 - num2
             elif cmd == "multiply":
-                result = num1*num2
+                result = num1 * num2
             elif cmd == "divide":
-                result = num1/num2
-            else:
-                print("Syntax error")
+                result = num1 / num2
             return str(result)
+
 
     elif cmd == "nap":
         exit()
     elif cmd == "spin":
         block = []
 
-        if "{" in line and line.strip().endswith("}"):
-            # inline block: spin 3 {meow "hi"}
-            inner = line[line.index("{")+1:line.rindex("}")].strip()
-            block = [inner]
-        elif repl_mode:
-            # multiline input in REPL
-            while True:
-                block_line = input("... ").strip()
-                if block_line == "}":
-                    break
-                block.append(block_line)
-        else:
-            # in file mode, block should already be extracted
-            print("[kitcoda error] Multiline spin blocks must be pre-parsed in file mode.")
-            return
-
         if words[1].isdigit():
             count = int(words[1])
+            if "{" in line and line.strip().endswith("}"):
+                inner = line[line.index("{")+1:line.rindex("}")].strip()
+                block = [inner]
+            else:
+                while True:
+                    block_line = input("... ").strip()
+                    if block_line == "}":
+                        break
+                    block.append(block_line)
             for _ in range(count):
                 for b in block:
                     run_line(b, variables, functions, repl_mode=repl_mode)
 
         elif words[1] == "while":
-            brace_index = line.index("{")
-            cond = line[line.index("while") + 5 : brace_index].strip()
+            # Extract condition
+            match = re.search(r"while\s+(.*?)\s*\{", line)
+            cond = match.group(1).strip() if match else None
+            if cond is None:
+                print("[kitcoda error] Invalid spin while syntax.")
+                return
+
             while True:
-                result = run_and_capture(f"bap {cond} {{ \"true\" }}", variables, functions, repl_mode=repl_mode)
-                if result.strip() != "true":
+                block_line = input("... ").strip()
+                if block_line == "}":
                     break
+                block.append(block_line)
+
+            # Run loop
+            while evaluate_condition(cond, variables):
                 for b in block:
                     run_line(b, variables, functions, repl_mode=repl_mode)
 
 
 
-
     else:
         print("Invalid command.")
+    
 
 def compile():
     i = 0
@@ -280,7 +332,7 @@ def compile():
                 i += 1
                 continue
 
-            if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like" and words[5] == "{":
+            if words[2] in ["is", "isn't", "isnt"] and words[3] == "like" and words[5] == "{":
                 val1 = resolve_value(words[1], variables)
                 val2 = resolve_value(words[4], variables)
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
@@ -376,7 +428,7 @@ def main():
 
 
         elif cmd == "bap":
-            if len(words) >= 6 and words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
+            if words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
                 val1 = resolve_value(words[1], variables)
                 val2 = resolve_value(words[4], variables)
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
@@ -415,6 +467,31 @@ def main():
                         run_line(bl, variables, functions)
 
                     continue  # skip extra i += 1
+        elif cmd == "spin" and len(words) >= 2 and words[1] == "while":
+            # Extract condition (same as before)
+            match = re.search(r"while\s+(.*?)\s*\{", line)
+            cond = match.group(1).strip() if match else None
+            if cond is None:
+                print("[kitcoda error] Invalid spin while syntax.")
+                i += 1
+                continue
+
+            # Capture block
+            block_lines = []
+            i += 1
+            while i < len(lines) and lines[i].strip() != "}":
+                block_lines.append(lines[i].strip())
+                i += 1
+
+            # Run loop
+            while evaluate_condition(cond, variables):
+                for bl in block_lines:
+                    run_line(bl, variables, functions)
+            continue
+
+
+
+
 
         else:
             run_line(line, variables, functions, repl_mode=False)
