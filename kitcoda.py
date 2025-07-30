@@ -40,9 +40,10 @@ def tokenize(line):
 
 def normalize_output(result):
     result = result.strip()
-    if result.startswith('"') and result.endswith('"'):
-        result = result[1:-1]
+    if (result.startswith('"') and result.endswith('"')) or (result.startswith("'") and result.endswith("'")):
+        return result[1:-1]
     return result
+
 
 
 def extract_block(lines, start_index):
@@ -111,8 +112,10 @@ def import_functions_only(path, functions):
             i += 1
             continue
 
-        if len(words) == 3 and words[0] == "purr" and words[2] == "{":
+        if "{" in words:
+            brace_index = words.index("{")
             funcname = words[1]
+            params = words[2:brace_index]
             func_lines = []
             i += 1
             while i < len(lines):
@@ -121,7 +124,10 @@ def import_functions_only(path, functions):
                     break
                 func_lines.append(fline)
                 i += 1
-            functions[funcname] = func_lines
+            functions[funcname] = {
+                "params": params,
+                "lines": func_lines
+            }
         else:
             pass  # ignore anything else
 
@@ -166,14 +172,16 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             elif value_line in variables:
                 variables[varname] = [variables[value_line][0]]
             else:
-                variables[varname] = [value_line]
+                variables[varname] = [resolve_value(value_line, variables)]
 
     elif cmd == "eat":
         if len(words) >= 3 and words[2] == "is":
             varname = words[1]
             prompt = " ".join(words[3:]).strip()
+            prompt = resolve_value(prompt, variables)  # ← unwrap quotes
             value = input(prompt)
             variables[varname] = [value.strip()]
+
     elif cmd == "bap":
 
         if words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
@@ -215,9 +223,24 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
 
     elif cmd == "pounce":
         funcname = words[1]
+        args = words[2:]
         if funcname in functions:
-            for fline in functions[funcname]:
-                run_line(fline, variables, functions)
+            funcdata = functions[funcname]
+            params = funcdata["params"]
+            lines = funcdata["lines"]
+
+            # Clone current vars so local changes don't mess up global state
+            local_vars = variables.copy()
+
+            # Bind args to param names
+            for i, param in enumerate(params):
+                if i < len(args):
+                    local_vars[param] = [resolve_value(args[i], variables)]
+
+            for fline in lines:
+                run_line(fline, local_vars, functions, repl_mode=True)
+
+
     elif cmd == "sip":
         if len(words) >= 2:
             import_path = resolve_value(words[1], variables)
@@ -315,15 +338,20 @@ def compile():
         cmd = words[0].lower()
 
         if cmd == "purr":
-            if len(words) == 3 and words[2] == "{":
+            if "{" in words:
+                brace_index = words.index("{")
                 funcname = words[1]
+                params = words[2:brace_index]  # ['name', 'age', ...]
                 func_lines = []
                 while True:
                     fline = input("... ").strip()
                     if fline == "}":
                         break
                     func_lines.append(fline)
-                functions[funcname] = func_lines
+                functions[funcname] = {
+                    "params": params,
+                    "lines": func_lines
+                }
         elif cmd == "bap":
             if "{" in line and line.strip().endswith("}"):
                 result = run_line(line, variables, functions)
@@ -414,8 +442,10 @@ def main():
         cmd = words[0]
 
         if cmd == "purr":
-            if len(words) == 3 and words[2] == "{":
+            if "{" in words:
+                brace_index = words.index("{")
                 funcname = words[1]
+                params = words[2:brace_index]  # ['name', 'age', ...]
                 func_lines = []
                 i += 1
                 while i < len(lines):
@@ -424,7 +454,10 @@ def main():
                         break
                     func_lines.append(fline)
                     i += 1
-                functions[funcname] = func_lines
+                functions[funcname] = {
+                    "params": params,
+                    "lines": func_lines
+                }
 
 
         elif cmd == "bap":
