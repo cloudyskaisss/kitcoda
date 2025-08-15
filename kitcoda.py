@@ -129,18 +129,17 @@ def import_functions_only(path, functions):
                 "lines": func_lines
             }
         else:
-            pass  # ignore anything else
+            pass
 
         i += 1
 
 
 def run_line(line, variables, functions, repl_mode=False, as_condition=False):
     if line in ["{", "}", "bop {"]:
-        return  # quietly skip control flow markers
+        return
     try:
         line = strip_comment(line)
 
-        # ✨ check this early!
         is_inline_block = "{" in line and line.strip().endswith("}")
 
         words = tokenize(line)
@@ -155,17 +154,18 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
     
     cmd = words[0]
     if cmd == "meow":
+        # print something
         printstr = words[1:]
         output = [resolve_value(w, variables) for w in printstr]
         print(" ".join(output), flush=True)
 
     elif cmd == "sit":
+        # set a variable
         if len(words) >= 4 and words[2] == "is":
             varname = words[1]
             value_line = " ".join(words[3:])
             subwords = tokenize(value_line)
 
-            # if the RHS is a math command, run it immediately
             if subwords[0] in ["add", "subtract", "multiply", "divide"]:
                 result = run_line(value_line, variables, functions)
                 variables[varname] = [result]
@@ -177,23 +177,22 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             else:
                 variables[varname] = [resolve_value(value_line, variables)]
 
-
     elif cmd == "eat":
+        # take input
         if len(words) >= 3 and words[2] == "is":
             varname = words[1]
             prompt = " ".join(words[3:]).strip()
-            prompt = resolve_value(prompt, variables)  # ← unwrap quotes
+            prompt = resolve_value(prompt, variables)
             value = input(prompt)
             variables[varname] = [value.strip()]
 
     elif cmd == "bap":
-
+        # if statement
         if words[2] in ["is", "isn't", "isnt"] and words[3] == "like":
             val1 = resolve_value(words[1], variables)
             val2 = resolve_value(words[4], variables)
 
             baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
-            block = None  # Always define block early
 
             if is_inline_block:
                 clean = strip_comment(line)
@@ -209,23 +208,18 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
 
             if block:
                 if as_condition:
-                    # If this bap is used as a condition, return result of the block
                     result = run_and_capture(block, variables, functions, repl_mode=repl_mode)
                     result = normalize_output(result)
                     return result if result else ("true" if baptruth else "false")
                 else:
-                    # If it's a control flow bap, just execute the block
                     for line in block.split(";"):
                         run_line(line.strip(), variables, functions)
                     return None
             else:
                 return "true" if baptruth else "false"
 
-
-
-
-
     elif cmd == "pounce":
+        # function call
         funcname = words[1]
         args = words[2:]
         if funcname in functions:
@@ -233,10 +227,8 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             params = funcdata["params"]
             lines = funcdata["lines"]
 
-            # Clone current vars so local changes don't mess up global state
             local_vars = variables.copy()
 
-            # Bind args to param names, resolving variable names to their values
             for i, param in enumerate(params):
                 if i < len(args):
                     val = resolve_value(args[i], variables)
@@ -245,19 +237,20 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
 
             for fline in lines:
                 result = run_line(fline, local_vars, functions, repl_mode=True)
-                if result is not None and fline.strip().startswith("return"):
+                if result is not None and fline.strip().startswith("toss"):
                     return result
 
-
-
     elif cmd == "sip":
+        # import a file
         if len(words) >= 2:
             import_path = resolve_value(words[1], variables)
             if os.path.exists(import_path) and import_path.endswith(".kit"):
                 import_functions_only(import_path, functions)
             else:
                 print(f"[kitcoda error] could not sip file '{import_path}'")
+
     elif cmd in ["add", "subtract", "multiply", "divide"]:
+        # math
         if len(words) >= 4 and words[2] == "with":
             num1_raw = resolve_value(words[1], variables)
             num2_raw = resolve_value(words[3], variables)
@@ -277,11 +270,13 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             elif cmd == "divide":
                 result = num1 / num2
             return str(result)
-
-
+        
     elif cmd == "nap":
+        # exit the program
         exit()
+
     elif cmd == "spin":
+        # loops (while or if loops)
         block = []
 
         if words[1].isdigit():
@@ -300,7 +295,6 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
                     run_line(b, variables, functions, repl_mode=repl_mode)
 
         elif words[1] == "while":
-            # Extract condition
             match = re.search(r"while\s+(.*?)\s*\{", line)
             cond = match.group(1).strip() if match else None
             if cond is None:
@@ -313,13 +307,12 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
                     break
                 block.append(block_line)
 
-            # Run loop
             while evaluate_condition(cond, variables):
                 for b in block:
                     run_line(b, variables, functions, repl_mode=repl_mode)
 
-    elif cmd == "return":
-        # `return` only works inside a function
+    elif cmd == "toss":
+        # toss only works inside a function
         if len(words) > 1:
             value_str = " ".join(words[1:])
             result = resolve_value(value_str, variables)
@@ -358,7 +351,7 @@ def compile():
             if "{" in words:
                 brace_index = words.index("{")
                 funcname = words[1]
-                params = words[2:brace_index]  # ['name', 'age', ...]
+                params = words[2:brace_index]
                 func_lines = []
                 while True:
                     fline = input("... ").strip()
@@ -370,6 +363,7 @@ def compile():
                     "lines": func_lines
                 }
         elif cmd == "bap":
+            # if statements are bap, else statements are bop
             if "{" in line and line.strip().endswith("}"):
                 result = run_line(line, variables, functions)
                 if result is not None and result != "":
@@ -389,7 +383,6 @@ def compile():
                 while True:
                     block_line = input("... ").strip()
                     if block_line == "}":
-                        # check if next line is 'bop {'
                         next_line = input("... ").strip()
                         if next_line == "bop {":
                             collecting_else = True
@@ -459,10 +452,11 @@ def main():
         cmd = words[0]
 
         if cmd == "purr":
+            # function definition
             if "{" in words:
                 brace_index = words.index("{")
                 funcname = words[1]
-                params = words[2:brace_index]  # ['name', 'age', ...]
+                params = words[2:brace_index]
                 func_lines = []
                 i += 1
                 while i < len(lines):
@@ -484,12 +478,10 @@ def main():
                 baptruth = (val1 == val2) if words[2] == "is" else (val1 != val2)
 
                 if "{" in line and line.strip().endswith("}"):
-                    # INLINE
                     inner = line[line.index("{")+1:line.rindex("}")].strip()
                     if baptruth:
                         run_line(inner, variables, functions)
                 else:
-                    # MULTILINE
                     i += 1
                     block_lines = []
                     else_lines = []
@@ -498,10 +490,9 @@ def main():
                     while i < len(lines):
                         block_line = lines[i].strip()
                         if block_line == "}":
-                            # Check if next line is 'bop {'
                             if i + 1 < len(lines) and lines[i + 1].strip() == "bop {":
                                 collecting_else = True
-                                i += 2  # skip over the 'bop {' line
+                                i += 2
                                 continue
                             else:
                                 break
@@ -516,9 +507,9 @@ def main():
                     for bl in chosen_block:
                         run_line(bl, variables, functions)
 
-                    continue  # skip extra i += 1
+                    continue
         elif cmd == "spin" and len(words) >= 2 and words[1] == "while":
-            # Extract condition (same as before)
+            # spin while loop
             match = re.search(r"while\s+(.*?)\s*\{", line)
             cond = match.group(1).strip() if match else None
             if cond is None:
@@ -526,14 +517,12 @@ def main():
                 i += 1
                 continue
 
-            # Capture block
             block_lines = []
             i += 1
             while i < len(lines) and lines[i].strip() != "}":
                 block_lines.append(lines[i].strip())
                 i += 1
 
-            # Run loop
             while evaluate_condition(cond, variables):
                 for bl in block_lines:
                     run_line(bl, variables, functions)
