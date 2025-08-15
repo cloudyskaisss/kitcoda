@@ -163,16 +163,20 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
         if len(words) >= 4 and words[2] == "is":
             varname = words[1]
             value_line = " ".join(words[3:])
-            if value_line.startswith("add ") or value_line.startswith("pounce ") or (value_line.startswith("bap ") and (value_line.endswith("}"))):
-                result = run_line(value_line, variables, functions)
-                if result is None:
-                    result = ""
+            subwords = tokenize(value_line)
 
+            # if the RHS is a math command, run it immediately
+            if subwords[0] in ["add", "subtract", "multiply", "divide"]:
+                result = run_line(value_line, variables, functions)
                 variables[varname] = [result]
+            elif subwords[0] == "pounce" or (subwords[0] == "bap" and value_line.endswith("}")):
+                result = run_line(value_line, variables, functions)
+                variables[varname] = [result if result is not None else ""]
             elif value_line in variables:
                 variables[varname] = [variables[value_line][0]]
             else:
                 variables[varname] = [resolve_value(value_line, variables)]
+
 
     elif cmd == "eat":
         if len(words) >= 3 and words[2] == "is":
@@ -232,13 +236,18 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             # Clone current vars so local changes don't mess up global state
             local_vars = variables.copy()
 
-            # Bind args to param names
+            # Bind args to param names, resolving variable names to their values
             for i, param in enumerate(params):
                 if i < len(args):
-                    local_vars[param] = [resolve_value(args[i], variables)]
+                    val = resolve_value(args[i], variables)
+                    local_vars[param] = [val]
+
 
             for fline in lines:
-                run_line(fline, local_vars, functions, repl_mode=True)
+                result = run_line(fline, local_vars, functions, repl_mode=True)
+                if result is not None and fline.strip().startswith("return"):
+                    return result
+
 
 
     elif cmd == "sip":
@@ -309,6 +318,14 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
                 for b in block:
                     run_line(b, variables, functions, repl_mode=repl_mode)
 
+    elif cmd == "return":
+        # `return` only works inside a function
+        if len(words) > 1:
+            value_str = " ".join(words[1:])
+            result = resolve_value(value_str, variables)
+            return result
+        else:
+            return ""
 
 
     else:
