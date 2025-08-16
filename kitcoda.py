@@ -204,7 +204,11 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
                     true_block = clean.split("{", 1)[1].rsplit("}", 1)[0].strip()
                     false_block = None
 
-                block = true_block if baptruth else false_block
+                if baptruth:
+                    block = true_block
+                else:
+                    block = false_block
+
 
             if block:
                 if as_condition:
@@ -250,10 +254,16 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
                 print(f"[kitcoda error] could not sip file '{import_path}'")
 
     elif cmd in ["add", "subtract", "multiply", "divide"]:
-        # math
         if len(words) >= 4 and words[2] == "with":
             num1_raw = resolve_value(words[1], variables)
             num2_raw = resolve_value(words[3], variables)
+
+            # safeguard: default to 0 if missing/empty
+            if num1_raw is None or str(num1_raw).strip() == "":
+                num1_raw = 0
+            if num2_raw is None or str(num2_raw).strip() == "":
+                num2_raw = 0
+
             try:
                 num1 = int(num1_raw)
                 num2 = int(num2_raw)
@@ -270,6 +280,7 @@ def run_line(line, variables, functions, repl_mode=False, as_condition=False):
             elif cmd == "divide":
                 result = num1 / num2
             return str(result)
+
         
     elif cmd == "nap":
         # exit the program
@@ -489,18 +500,23 @@ def main():
 
                     while i < len(lines):
                         block_line = lines[i].strip()
+
                         if block_line == "}":
+                            # check if next line starts an else block
                             if i + 1 < len(lines) and lines[i + 1].strip() == "bop {":
                                 collecting_else = True
-                                i += 2
+                                i += 2  # skip the "}" and the "bop {" only
                                 continue
                             else:
                                 break
-                        elif collecting_else:
+
+                        if collecting_else:
                             else_lines.append(block_line)
                         else:
                             block_lines.append(block_line)
+
                         i += 1
+
 
                     chosen_block = block_lines if baptruth else else_lines
 
@@ -522,11 +538,31 @@ def main():
             while i < len(lines) and lines[i].strip() != "}":
                 block_lines.append(lines[i].strip())
                 i += 1
+            i += 1
 
             while evaluate_condition(cond, variables):
                 for bl in block_lines:
                     run_line(bl, variables, functions)
             continue
+
+        elif cmd == "spin" and words[1].isdigit():
+            count = int(words[1])
+            block_lines = []
+            if "{" in line and line.strip().endswith("}"):
+                # inline form
+                inner = line[line.index("{")+1:line.rindex("}")].strip()
+                block_lines = [inner]
+            else:
+                i += 1
+                while i < len(lines) and lines[i].strip() != "}":
+                    block_lines.append(lines[i].strip())
+                    i += 1
+                i += 1  # skip the closing }
+            for _ in range(count):
+                for bl in block_lines:
+                    run_line(bl, variables, functions)
+            continue
+
 
 
 
