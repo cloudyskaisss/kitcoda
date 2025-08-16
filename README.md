@@ -35,6 +35,195 @@ However, I feel that I have learned a few things from it:
 - Parsing
 - And finally, how to get through the struggles of coding!
 
-This is my first published, completed project.
+This is also my first published, completed project.
+
+How to use KitCoda:
+-
+
+There are two modes to use KitCoda: REPL ( one line at a time ), or file ( write a file, give it to the parser )
+
+In KitCoda, you start every line of code with a command. There are 15 main commands ( commands you can start a line with ), with 2 subcommands ( commands in a seperate statement ), which we'll talk about individually later.
+
+For now, you can know them as meow, sit, bap, purr, pounce, spin, add, subtract, multiply, divide, eat, sip, and nap.
+
+Now, let's get into commands!
+
+### meow
+
+Function: logs something to the command line.
+
+Syntax:
+
+    sit var is "!"
+    meow "hello world"  
+    meow var
+    meow "hello world" var
+
+Output:
+
+    hello world
+    !
+    hello world !
+
+Don't worry, you'll learn sit in just a moment!
+
+### sit
+
+Function: sets a variable.
+
+Syntax:
+
+    sit var is "meow"
+    sit purr is "hi"
+    sit hello is var
+
+    meow var purr hello
+
+Output:
+
+    meow hi meow
+
+### bap
+
+Function: tests if something is true. does something if it is. optionally: does something else if it isnt.
+
+Syntax:
+
+    sit var1 is "hello"
+    sit var2 is "hi"
+    sit var3 is "hello"
+
+    bap var1 is like var2 {
+      meow var1
+    } bop {
+      meow var2
+    }
+
+Output:
+
+    hi
+
+### purr & pounce
+
+Function: purr defines a function. these can take arguments! pounce runs a function and optionally passes arguments to it.
+
+Syntax:
+
+    sit meow is "hello world"
+    purr func var {
+      meow var
+    }
+    pounce func meow
+
+Output:
+
+    hello world
+
+### spin
+
+Function: loops! does something over and over.
+
+Syntax:
+
+    sit var is 0
+    spin while bap var isnt like 3 {
+      meow "hello world"
+      sit var is add var with 1
+    }
+    spin 2 times {
+      meow hi
+    }
+
+
+Output:
+
+    hello world
+    hello world
+    hello world
+    hi
+    hi
+
+### math commands
+
+Function: add, subtract, multiply, or divide things. you can do lots with these!
+
+Syntax:
+
+    sit x is 5
+    sit y is 10
+    sit z is add x with y
+    meow z
+    sit z is subtract y with x
+    meow z
+    sit z is multiply x with y
+    meow z
+    sit z is divide y with x
+    meow z
+
+Output:
+
+    15
+    5
+    50
+    2.0
+
+### eat
+
+Function: takes user input.
+
+Syntax:
+
+    sit name is eat "What is your name? "
+    sit age is eat "How old are you? "
+    meow "You are" name "and you are" age "years old"
+
+Output:
+    
+    What's your name? skai
+    How old are you? 14
+    You are skai and you are 14 years old
+
+### sip
+
+Function: take functions from another file. thievery!
+
+Syntax:
+
+  in one file (hello.kit):
+  
+        purr hello {
+          meow "hello"
+        }
+        purr world {
+          meow "world"
+        }
+
+  in another file:
+
+        sip hello.kit
+        pounce hello
+        pounce world
+
+Output:
+
+    hello
+    world
+
+### nap
+
+Function: goes to sleep! exits the program.
+
+Syntax:
+
+    meow "hello"
+    nap
+    meow "world"
+
+Output:
+
+    hello
+
+
+
 
 [![Athena Award Badge](https://img.shields.io/endpoint?url=https%3A%2F%2Faward.athena.hackclub.com%2Fapi%2Fbadge)](https://award.athena.hackclub.com?utm_source=readme)
